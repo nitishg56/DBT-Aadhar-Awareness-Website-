@@ -19,7 +19,19 @@ import {
   Clock,
   Upload,
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
+} from 'recharts';
+
+// 🗺 Map imports
+import { MapContainer, TileLayer, CircleMarker, Tooltip as LeafletTooltip } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 
 interface PanchayatDashboardProps {
   onNavigate: (page: string) => void;
@@ -67,6 +79,15 @@ interface ReportFormState {
 interface ReportPhoto {
   name: string;
   dataUrl: string;
+}
+
+// type for village data with coordinates
+interface VillageCoverage {
+  village: string;
+  enabled: number;
+  pending: number;
+  lat: number;
+  lng: number;
 }
 
 export default function PanchayatDashboard({ onNavigate }: PanchayatDashboardProps) {
@@ -160,11 +181,18 @@ export default function PanchayatDashboard({ onNavigate }: PanchayatDashboardPro
   const [reportPhotos, setReportPhotos] = useState<ReportPhoto[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const chartData = [
-    { village: 'Rampur', enabled: 68, pending: 12 },
-    { village: 'Khajuriya', enabled: 32, pending: 8 },
-    { village: 'Sultanpur', enabled: 18, pending: 8 },
+  // --- RESOURCES STATE ---
+  const [panchayatResources] = useState<any[]>([]);
+
+  // 🗺 Village data with coordinates (approx around Varanasi region)
+  const chartData: VillageCoverage[] = [
+    { village: 'Rampur',    enabled: 68, pending: 12, lat: 25.3700, lng: 82.9800 },
+    { village: 'Khajuriya', enabled: 32, pending: 8,  lat: 25.3800, lng: 83.0100 },
+    { village: 'Sultanpur', enabled: 18, pending: 8,  lat: 25.3600, lng: 82.9500 },
   ];
+
+  // For map selection highlight
+  const [selectedVillage, setSelectedVillage] = useState<string | null>(null);
 
   // HANDLE FORM INPUT CHANGE (EVENT)
   const handleEventInputChange = (
@@ -313,7 +341,7 @@ export default function PanchayatDashboard({ onNavigate }: PanchayatDashboardPro
 
         try {
           doc.addImage(img, 'JPEG', margin, contentTop + 5, imgWidth, imgHeight);
-        } catch (e) {
+        } catch {
           doc.text('Unable to render this photo in PDF preview.', margin, contentTop + 15);
         }
       });
@@ -404,7 +432,6 @@ export default function PanchayatDashboard({ onNavigate }: PanchayatDashboardPro
     const lines = [...baseLines, ...photoLines, ...footerLines];
 
     if (format === 'PDF') {
-      // Pass actual image data URLs so they appear in the PDF
       downloadPdf(fileName, lines, photoDataUrls && photoDataUrls.length ? photoDataUrls : undefined);
     } else {
       const content = lines.join('\n');
@@ -674,7 +701,7 @@ export default function PanchayatDashboard({ onNavigate }: PanchayatDashboardPro
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="village" />
                   <YAxis />
-                  <Tooltip />
+                  <RechartsTooltip />
                   <Bar dataKey="enabled" fill="#138808" name="Enabled" />
                   <Bar dataKey="pending" fill="#f59e0b" name="Pending" />
                 </BarChart>
@@ -1327,14 +1354,7 @@ export default function PanchayatDashboard({ onNavigate }: PanchayatDashboardPro
           </div>
 
           <div className="grid md:grid-cols-3 gap-6">
-            {[
-              { title: 'DBT पोस्टर (हिंदी)', language: 'Hindi', type: 'Poster', size: '2.1 MB' },
-              { title: 'DBT Poster (English)', language: 'English', type: 'Poster', size: '1.9 MB' },
-              { title: 'पंचायत अधिकारी गाइड', language: 'Hindi', type: 'Guide', size: '3.2 MB' },
-              { title: 'Panchayat Officer Guide', language: 'English', type: 'Guide', size: '3.0 MB' },
-              { title: 'जागरूकता सत्र प्रस्तुति', language: 'Hindi', type: 'PPT', size: '4.5 MB' },
-              { title: 'Camp Organization Manual', language: 'English', type: 'PDF', size: '2.8 MB' },
-            ].map((resource, index) => (
+            {panchayatResources.map((resource, index) => (
               <Card key={index} className="hover:shadow-lg transition-shadow">
                 <CardContent className="pt-6">
                   <div className="flex flex-col items-center text-center">
@@ -1344,13 +1364,14 @@ export default function PanchayatDashboard({ onNavigate }: PanchayatDashboardPro
                     <Badge variant="outline" className="mb-2">
                       {resource.language}
                     </Badge>
-                    <h3 className="mb-1">{resource.title}</h3>
+                    <h3 className="mb-1">{resource.name}</h3>
                     <div className="text-sm text-gray-600 mb-4">
-                      {resource.type} • {resource.size}
+                      {resource.type} • {resource.size || 'N/A'}
                     </div>
                     <Button
                       variant="outline"
                       className="w-full border-[#FF9933] text-[#FF9933] hover:bg-orange-50"
+                      onClick={() => window.open(resource.path, '_blank')}
                     >
                       <BookOpen className="w-4 h-4 mr-2" />
                       Download
@@ -1359,17 +1380,22 @@ export default function PanchayatDashboard({ onNavigate }: PanchayatDashboardPro
                 </CardContent>
               </Card>
             ))}
+            {panchayatResources.length === 0 && (
+              <p className="text-sm text-gray-500">
+                No resources configured yet. You can plug your PDF/PNG URLs here.
+              </p>
+            )}
           </div>
         </div>
       )}
 
-      {/* MAP TAB */}
+      {/* MAP TAB – now with interactive coverage map */}
       {currentTab === 'map' && (
         <div className="space-y-6">
           <div>
             <h2 className="text-2xl text-[#002147] mb-1">Coverage Heat Map</h2>
             <p className="text-gray-600">
-              Village-level DBT enablement visualization
+              Village-level DBT enablement visualization on actual map
             </p>
           </div>
 
@@ -1377,28 +1403,126 @@ export default function PanchayatDashboard({ onNavigate }: PanchayatDashboardPro
             <CardHeader>
               <CardTitle>Panchayat Area Map</CardTitle>
               <CardDescription>
-                DBT enablement status across villages
+                DBT enablement status across villages (click village cards to highlight)
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="bg-gray-100 rounded-lg p-8 h-96 flex items-center justify-center">
-                <div className="text-center">
-                  <MapPin className="w-16 h-16 mx-auto text-[#FF9933] mb-4" />
-                  <p className="text-gray-600">
-                    Interactive map showing village-level DBT coverage
-                  </p>
-                  <p className="text-sm text-gray-500 mt-2">
-                    Heat map visualization with color-coded status indicators
+              <div className="grid lg:grid-cols-[2fr,1fr] gap-6">
+                {/* 🗺 Interactive Map */}
+                <div className="h-96 rounded-lg overflow-hidden border shadow-sm">
+                  <MapContainer
+                    center={[25.37, 82.98]} // roughly Rampur / Varanasi side
+                    zoom={12}
+                    className="h-full w-full"
+                    scrollWheelZoom={false}
+                  >
+                    <TileLayer
+                      attribution='&copy; OpenStreetMap contributors'
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    />
+                    {chartData.map((village) => {
+                      const total = village.enabled + village.pending;
+                      const percentage = total ? (village.enabled / total) * 100 : 0;
+                      const isSelected = selectedVillage === village.village;
+
+                      let color = '#ef4444'; // red
+                      if (percentage > 75) color = '#138808';
+                      else if (percentage > 50) color = '#f59e0b';
+
+                      return (
+                        <CircleMarker
+                          key={village.village}
+                          center={[village.lat, village.lng]}
+                          radius={isSelected ? 14 : 10}
+                          pathOptions={{
+                            color,
+                            fillColor: color,
+                            fillOpacity: 0.7,
+                          }}
+                        >
+                          <LeafletTooltip direction="top" offset={[0, -10]}>
+                            <div className="text-xs">
+                              <div className="font-semibold">
+                                {village.village}
+                              </div>
+                              <div>Enabled: {village.enabled}</div>
+                              <div>Pending: {village.pending}</div>
+                              <div>
+                                Coverage:{' '}
+                                {total ? Math.round((village.enabled / total) * 100) : 0}%
+                              </div>
+                            </div>
+                          </LeafletTooltip>
+                        </CircleMarker>
+                      );
+                    })}
+                  </MapContainer>
+                </div>
+
+                {/* 📌 Village Reference Sidebar */}
+                <div className="space-y-3">
+                  {chartData.map((village) => {
+                    const total = village.enabled + village.pending;
+                    const percentage = total
+                      ? Math.round((village.enabled / total) * 100)
+                      : 0;
+
+                    const high = percentage > 75;
+                    const medium = percentage > 50;
+                    const colorClass = high
+                      ? 'bg-green-100 text-green-800'
+                      : medium
+                      ? 'bg-yellow-100 text-yellow-800'
+                      : 'bg-red-100 text-red-800';
+
+                    return (
+                      <button
+                        key={village.village}
+                        type="button"
+                        onClick={() =>
+                          setSelectedVillage(
+                            selectedVillage === village.village ? null : village.village
+                          )
+                        }
+                        className={`w-full text-left p-3 rounded border flex items-center justify-between gap-3 hover:shadow-sm transition-shadow ${
+                          selectedVillage === village.village
+                            ? 'border-[#FF9933] bg-orange-50'
+                            : 'border-gray-200 bg-white'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <MapPin className="w-4 h-4 text-[#FF9933]" />
+                            <span className="font-medium">{village.village}</span>
+                          </div>
+                          <div className="mt-1 text-xs text-gray-600">
+                            Enabled: {village.enabled} • Pending: {village.pending}
+                            <br />
+                            Approx. location around Varanasi region
+                          </div>
+                        </div>
+                        <span
+                          className={`px-2 py-1 text-xs rounded-full ${colorClass}`}
+                        >
+                          {percentage}% DBT
+                        </span>
+                      </button>
+                    );
+                  })}
+
+                  <p className="text-xs text-gray-500 mt-2">
+                    <span className="font-semibold">Legend:</span> Green = High coverage (&gt; 75%), Yellow = Moderate coverage (51–75%), Red = Low coverage (≤ 50%).
                   </p>
                 </div>
               </div>
             </CardContent>
           </Card>
 
+          {/* Village cards with small progress bars (same as earlier but now under map) */}
           <div className="grid md:grid-cols-3 gap-6">
             {chartData.map((village, index) => {
               const total = village.enabled + village.pending;
-              const percentage = ((village.enabled / total) * 100).toFixed(0);
+              const percentage = total ? ((village.enabled / total) * 100).toFixed(0) : '0';
               return (
                 <Card
                   key={index}

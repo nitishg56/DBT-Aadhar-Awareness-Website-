@@ -21,7 +21,7 @@ export default function HeroSection() {
             </div>
             <h1 className="text-4xl md:text-5xl mb-4">
               Empowering Students through
-              <span className="block text-[#FF9933] mt-2">Direct Benefit Transparency</span>
+              <span className="block text-[#FF9933] mt-2">Direct Benefit Transfer</span>
             </h1>
             <p className="text-lg opacity-90 mb-6">
               Ensuring every scholarship reaches the right student, at the right time. Join the DBT awareness movement and verify your eligibility today.
